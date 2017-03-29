@@ -28,6 +28,12 @@ int main(int argc, char** argv)
     float* selectedColumnPartition = NULL;
     float** selectedColumns = NULL;
 
+    // Taken from http://mpi-forum.org/docs/mpi-1.1/mpi-11-html/node79.html
+    struct valueInfo {
+        float value;
+        int index;
+    } in, out;
+
     MPI_Init(NULL, NULL);
     int rank;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -38,7 +44,7 @@ int main(int argc, char** argv)
     {
         if(rank == 0)
         {
-            std::cout << "Error, number of process does not evenly divide 500" << std::endl;
+            std::cout << "Error, number of processes does not evenly divide 500" << std::endl;
         }
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
@@ -177,63 +183,53 @@ int main(int argc, char** argv)
         }
         else if(operation.compare("min") == 0)
         {
-            float processMin = selectedColumnPartition[0];
+            in.value = selectedColumnPartition[0];
+            in.index = 0;
 
             for(int i = 1; i < elementsPerProcess; i++)
             {
-                if(selectedColumnPartition[i] < processMin)
+                if(selectedColumnPartition[i] < in.value)
                 {
-                    processMin = selectedColumnPartition[i];
+                    in.value = selectedColumnPartition[i];
+                    in.index = i;
                 }
             }
+            in.index = rank * elementsPerProcess + in.index;
 
-            float overallMin;
-
-            MPI_Reduce(&processMin, &overallMin, 1, MPI_FLOAT, MPI_MIN, 0, MPI_COMM_WORLD);
+            MPI_Reduce(&in, &out, 1, MPI_FLOAT_INT, MPI_MINLOC, 0, MPI_COMM_WORLD);
 
             if(rank == 0)
             {
-                int minIndex = 0;
-                for(minIndex = 0; minIndex < 500; minIndex++)
-                {
-                    if(selectedColumn[minIndex] == overallMin)
-                    {
-                        break;
-                    }
-                }
+                float overallMin = out.value;
+                int minIndex = out.index;
 
                 std::cout << nameArray[minIndex][1] << ", " << nameArray[minIndex][2] << ", " << columnHeading[columnAbbrvMap[argv[3]]] << " = " << overallMin << std::endl;
             }
         }
         else if(operation.compare("max") == 0)
         {
-            float processMax = selectedColumnPartition[0];
+            in.value = selectedColumnPartition[0];
+            in.index = 0;
 
             for(int i = 1; i < elementsPerProcess; i++)
             {
-                if(selectedColumnPartition[i] > processMax)
+                if(selectedColumnPartition[i] > in.value)
                 {
-                    processMax = selectedColumnPartition[i];
+                    in.value = selectedColumnPartition[i];
+                    in.index = i;
                 }
             }
+            in.index = rank * elementsPerProcess + in.index;
 
-            float overallMax;
-
-            MPI_Reduce(&processMax, &overallMax, 1, MPI_FLOAT, MPI_MAX, 0, MPI_COMM_WORLD);
+            MPI_Reduce(&in, &out, 1, MPI_FLOAT_INT, MPI_MAXLOC, 0, MPI_COMM_WORLD);
 
             if(rank == 0)
             {
-                int maxIndex = 0;
-                for(maxIndex = 0; maxIndex < 500; maxIndex++)
-                {
-                    if(selectedColumn[maxIndex] == overallMax)
-                    {
-                        break;
-                    }
-                }
+                float overallMax = out.value;
+                int maxIndex = out.index;
 
-                std::cout << std::setprecision(15)
-                          << nameArray[maxIndex][1] << ", " << nameArray[maxIndex][2] << ", " << columnHeading[columnAbbrvMap[argv[3]]] << " = " << overallMax << std::endl;
+                std::cout << std::setprecision(15) <<
+                            nameArray[maxIndex][1] << ", " << nameArray[maxIndex][2] << ", " << columnHeading[columnAbbrvMap[argv[3]]] << " = " << overallMax << std::endl;
             }
         }
         else if(operation.compare("number") == 0)
@@ -297,7 +293,7 @@ int main(int argc, char** argv)
         {
             if(rank == 0)
             {
-                std::cout << "Error, number of process does not match number of columns." << std::endl;
+                std::cout << "Error, number of processes does not match number of columns." << std::endl;
             }
         }
         else
@@ -311,7 +307,6 @@ int main(int argc, char** argv)
                     for(int j = 0; j < 500; j++)
                     {
                         selectedColumns[i][j] = values[j][columnAbbrvMap[argv[i+3]]-2];
-                        //std::cout << selectedColumns[i][j] << std::endl;
                     }
                 }
             }
@@ -322,46 +317,40 @@ int main(int argc, char** argv)
 
             if(operation.compare("max") == 0)
             {
-                float maxValue;
-                float* maxValues;
+                struct valueInfo* maxValues = NULL;
 
                 if(rank == 0)
                 {
-                    maxValues = (float*)malloc(sizeof(float) * worldSize);
+                    maxValues = (valueInfo*)malloc(worldSize * sizeof(*maxValues));
                 }
 
                 for(int i = 0; i < worldSize; i++)
                 {
                     if(rank == i)
                     {
-                        maxValue = selectedColumns[i][0];
+                        in.value = selectedColumns[i][0];
 
                         for(int j = 1; j < 500; j++)
                         {
-                            if(selectedColumns[i][j] > maxValue)
+                            if(selectedColumns[i][j] > in.value)
                             {
-                                maxValue = selectedColumns[i][j];
+                                in.value = selectedColumns[i][j];
+                                in.index = j;
                             }
                         }
+                        break;
                     }
                 }
 
-                MPI_Gather(&maxValue, 1, MPI_FLOAT, maxValues, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+                MPI_Gather(&in, 1, MPI_FLOAT_INT, maxValues, 1, MPI_FLOAT_INT, 0, MPI_COMM_WORLD);
 
                 if(rank == 0)
                 {
                     for(int i = 0; i < worldSize; i++)
                     {
-                        int index = 0;
-                        for(index = 0; index < 500; index++)
-                        {
-                            if(selectedColumns[i][index] == maxValues[i])
-                            {
-                                break;
-                            }
-                        }
+                        int index = maxValues[i].index;
 
-                        std::cout << operation <<  " " << columnHeading[columnAbbrvMap[argv[i+3]]] << " = " << maxValues[i]
+                        std::cout << operation <<  " " << columnHeading[columnAbbrvMap[argv[i+3]]] << " = " << maxValues[i].value
                         << " " <<  nameArray[index][1] << " " << nameArray[index][0] << std::endl;
                     }
 
@@ -370,46 +359,40 @@ int main(int argc, char** argv)
             }
             else if(operation.compare("min") == 0)
             {
-                float minValue;
-                float* minValues;
+                struct valueInfo* minValues = NULL;
 
                 if(rank == 0)
                 {
-                    minValues = (float*)malloc(sizeof(float) * worldSize);
+                    minValues = (valueInfo*)malloc(worldSize * sizeof(*minValues));
                 }
 
                 for(int i = 0; i < worldSize; i++)
                 {
                     if(rank == i)
                     {
-                        minValue = selectedColumns[i][0];
+                        in.value = selectedColumns[i][0];
 
                         for(int j = 1; j < 500; j++)
                         {
-                            if(selectedColumns[i][j] < minValue)
+                            if(selectedColumns[i][j] < in.value)
                             {
-                                minValue = selectedColumns[i][j];
+                                in.value = selectedColumns[i][j];
+                                in.index = j;
                             }
                         }
+                        break;
                     }
                 }
 
-                MPI_Gather(&minValue, 1, MPI_FLOAT, minValues, 1, MPI_FLOAT, 0, MPI_COMM_WORLD);
+                MPI_Gather(&in, 1, MPI_FLOAT_INT, minValues, 1, MPI_FLOAT_INT, 0, MPI_COMM_WORLD);
 
                 if(rank == 0)
                 {
                     for(int i = 0; i < worldSize; i++)
                     {
-                        int index = 0;
-                        for(index = 0; index < 500; index++)
-                        {
-                            if(selectedColumns[i][index] == minValues[i])
-                            {
-                                break;
-                            }
-                        }
+                        int index = minValues[i].index;
 
-                        std::cout << operation <<  " " << columnHeading[columnAbbrvMap[argv[i+3]]] << " = " << minValues[i]
+                        std::cout << operation <<  " " << columnHeading[columnAbbrvMap[argv[i+3]]] << " = " << minValues[i].value
                         << " " <<  nameArray[index][1] << " " << nameArray[index][0] << std::endl;
                     }
 
@@ -438,6 +421,7 @@ int main(int argc, char** argv)
                         }
 
                         avgValue = sum/500.0;
+                        break;
                     }
                 }
 
